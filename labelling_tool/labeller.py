@@ -11,6 +11,7 @@ import cupy as cp  # Import cupy for GPU computations
 
 class ParticleLabelingApp:
     def __init__(self, master):
+        self.draw_locations_thread = threading.Thread(target=self.draw_particle_locations)
         self.master = master
         self.isDev = True
         master.title("Particle Connection Labeler")
@@ -23,6 +24,18 @@ class ParticleLabelingApp:
         # Load Image and JSON
         self.load_button = tk.Button(master, text="Load Image", command=self.load_image)
         self.load_button.pack()
+        
+        # Initialize show_locations as a BooleanVar
+        self.show_locations = tk.BooleanVar(value=True)  # Start with particles visible
+
+        # Create a checkbox to toggle particle visibility
+        self.visibility_checkbox = tk.Checkbutton(
+            master,
+            text="Show Particle Locations",
+            variable=self.show_locations,
+            command=self.show_hide_locations
+        )
+        self.visibility_checkbox.pack()
 
         # Create buttons for user input
         button_frame = tk.Frame(master)
@@ -62,6 +75,7 @@ class ParticleLabelingApp:
         # Bind mouse events for panning the main image
         self.canvas.bind('<ButtonPress-1>', self.start_pan)
         self.canvas.bind('<B1-Motion>', self.pan_image)
+        self.canvas.bind('<ButtonRelease-1>', self.on_pan_stop)
         
         # Add vertical scrollbar
         v_scroll = tk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
@@ -88,6 +102,7 @@ class ParticleLabelingApp:
 
         # Initialize list to store labels
         self.labels = []
+        self.labels_per_image = 100
 
         if self.isDev:
             self.load_image()
@@ -180,12 +195,11 @@ class ParticleLabelingApp:
         pairs = []
         checked_pairs = set()
 
-        # total_pairs = len(self.particles) * (len(self.particles) - 1) // 2
         processed_pairs = 0
 
         particles_array = cp.array(self.particles)  # Convert particles to GPU array
 
-        for i in range(10):# range(len(self.particles)):
+        for i in range(len(self.particles)):
             distances = cp.sqrt(cp.sum((particles_array[i] - particles_array[i+1:]) ** 2, axis=1))
             close_particles = cp.where(distances <= max_distance)[0]
 
@@ -209,6 +223,11 @@ class ParticleLabelingApp:
         self.show_next_pair()  # Show the first pair after processing
 
     def show_next_pair(self):
+        if self.pair_index >= (self.labels_per_image - 1):
+            self.status.config(text="ENOUGH PAIRS LABELED.")
+            # Save labels to a JSON file
+            self.save_data()
+            return
         if (self.pair_index + 1) >= len(self.pairs):
             self.status.config(text="All pairs labeled.")
             # Save labels to a JSON file
@@ -327,14 +346,16 @@ class ParticleLabelingApp:
     
     def start_pan(self, event):
         # Record the current canvas position
-        if self.dragging_overlay is False:
-            
+        if self.dragging_overlay is False:            
             self.canvas.scan_mark(event.x, event.y)
 
     def pan_image(self, event):
         # Move the canvas to the new position
         if self.dragging_overlay is False:
             self.canvas.scan_dragto(event.x, event.y, gain=1)
+            
+    def on_pan_stop(self, event):
+        self.refresh_locations()
             
     def init_labels(self):
         # Initialize labels for each pair as not connected
@@ -357,7 +378,75 @@ class ParticleLabelingApp:
         # save data to json file
         with open(f'labelled_data\\labels_{self.image_name.replace(self.image_ext, "")}.json', 'w') as f:
             json.dump(data, f)
+
+    def refresh_locations(self):
+        # Remove all particle locations
+        self.canvas.delete('particle_location')
+        # Redraw particle locations
+        self.show_hide_locations()
+    
+    def show_hide_locations(self):
+        # Show or hide the particle locations on the canvas
+        if self.show_locations.get():
+            if self.draw_locations_thread and self.draw_locations_thread.is_alive():
+                self.draw_locations_thread.join()                
+            self.draw_locations_thread = threading.Thread(target=self.draw_particle_locations)
+            self.draw_locations_thread.start()
+        else:
+            # only remove the particles
+            self.canvas.delete('particle_location')
             
+    def draw_particle_locations(self):
+        # Get the visible region of the canvas in canvas coordinates
+        x0 = self.canvas.canvasx(0)
+        y0 = self.canvas.canvasy(0)
+        x1 = self.canvas.canvasx(self.canvas.winfo_width())
+        y1 = self.canvas.canvasy(self.canvas.winfo_height())
+        # Draw particle locations on the canvas
+        for index, (orig_x, orig_y) in enumerate(self.particles):
+            x = orig_x * self.zoom_level
+            y = orig_y * self.zoom_level
+            # Check if the particle is within the visible region
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                radius = 1.3
+                self.canvas.create_oval(
+                    x - radius, y - radius, x + radius, y + radius, 
+                    fill='blue', outline='blue',
+                    tags=('particle_location', f'particle_{index}')
+                )
+                # Bind click event to the particle
+                self.canvas.tag_bind(f'particle_{index}', '<Button-1>', self.on_particle_click)
+     
+    def on_particle_click(self, event):
+        # Get the item that was clicked
+        item = self.canvas.find_withtag('current')[0]
+        # Highlight the selected particle
+        self.canvas.itemconfig(item, outline='red')
+        # Store the selected particle's ID
+        self.selected_particle = item
+        self.selected_particles.append(item)
+
+    def remove_particle(self):
+        # Remove the selected particle
+        if hasattr(self, 'selected_particle'):
+            # Delete from canvas
+            self.canvas.delete(self.selected_particle)
+            # Remove from self.particles list
+            tags = self.canvas.gettags(self.selected_particle)
+            for tag in tags:
+                if tag.startswith('particle_'):
+                    index = int(tag.split('_')[1])
+                    self.particles.pop(index)
+                    break
+            # Remove the attribute
+            del self.selected_particle
+            
+    def clear_particle_selection(self):
+        # Clear the selected particle
+        if hasattr(self, 'selected_particle'):
+            self.canvas.itemconfig(self.selected_particle, outline='blue')
+            del self.selected_particle
+                       
 if __name__ == "__main__":
     root = tk.Tk()
     app = ParticleLabelingApp(root)
