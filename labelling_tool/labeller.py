@@ -11,35 +11,49 @@ import cupy as cp  # Import cupy for GPU computations
 
 class ParticleLabelingApp:
     def __init__(self, master):
-        self.draw_locations_thread = threading.Thread(target=self.draw_particle_locations)
+        self.finding_pairs = False
+        
         self.master = master
         self.isDev = True
         master.title("Particle Connection Labeler")
-        self.resize_scale = 1
-        self.zoom_level = 1.0
+        self.zoom_level = 0.5
 
         self.overlay_position = (200, 200)
         self.dragging_overlay = False
-
-        # Load Image and JSON
-        self.load_button = tk.Button(master, text="Load Image", command=self.load_image)
-        self.load_button.pack()
         
-        # Initialize show_locations as a BooleanVar
-        self.show_locations = tk.BooleanVar(value=True)  # Start with particles visible
 
-        # Create a checkbox to toggle particle visibility
-        self.visibility_checkbox = tk.Checkbutton(
-            master,
-            text="Show Particle Locations",
-            variable=self.show_locations,
-            command=self.show_hide_locations
-        )
-        self.visibility_checkbox.pack()
+        self.create_sideBar()
+        self.create_topBar()
+        self.create_Canvas()
+    
+        # Label status
+        self.status = tk.Label(master, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Create buttons for user input
-        button_frame = tk.Frame(master)
+        # Variables
+        self.original_image = None
+        self.resized_image = None
+        self.display_image = None
+        self.image_id = None
+        self.particles = []
+        self.current_pair = None
+        self.pair_index = -1
+
+        # Initialize list to store labels
+        self.labels = []
+        self.labels_per_image = 100
+
+        if self.isDev:
+            self.load_image()
+
+    def create_topBar(self):
+        # Create buttons for user input on button frame
+        button_frame = tk.Frame(self.master)
         button_frame.pack()
+        
+        # Load Image and JSON
+        self.load_button = tk.Button(button_frame, text="Load Image", command=self.load_image)
+        self.load_button.pack(side=tk.LEFT)
 
         self.connected_button = tk.Button(button_frame, text="<<", command=self.show_previous_pair)
         self.connected_button.pack(side=tk.LEFT)
@@ -58,9 +72,51 @@ class ParticleLabelingApp:
         
         self.not_connected_button = tk.Button(button_frame, text="Save Data", command=self.save_data)
         self.not_connected_button.pack(side=tk.LEFT)
-
+    
+    def create_sideBar(self):
+        # Create a frame on the left side
+        self.left_frame = tk.Frame(self.master)
+        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, pady=50)
+        
+        # Initialize show_locations as a BooleanVar
+        self.show_locations = tk.BooleanVar(value=True)  # Start with particles visible
+        # Create a checkbox to toggle particle visibility
+        self.visibility_checkbox = tk.Checkbutton(
+            self.left_frame,
+            text="Show Particle Locations",
+            variable=self.show_locations,
+            command=self.show_hide_locations,
+            style='Toggle.TButton'
+        )
+        self.visibility_checkbox.pack(anchor='nw', pady=(0, 5))
+        
+        # Initialize delete location as a BooleanVar
+        self.deleting_locations = tk.BooleanVar(value=True)  # Start with particles visible
+        # Create a checkbox to toggle delete functionality
+        self.delete_location_checkbox = tk.Checkbutton(
+            self.left_frame,
+            text="Delete Particle Location",
+            variable=self.deleting_locations,
+            # command=self.delete_locations,
+            style='Toggle.TButton'
+        )
+        self.delete_location_checkbox.pack(anchor='nw', pady=(0, 5))
+        
+        # Initialize delete location as a BooleanVar
+        self.adding_locations = tk.BooleanVar(value=True)  # Start with particles visible
+        # Create a checkbox to toggle add functionality
+        self.add_location_checkbox = tk.Checkbutton(
+            self.left_frame,
+            text="Add Particle Location",
+            variable=self.adding_locations,
+            # command=self.add_locations,
+            style='Toggle.TButton'
+        )
+        self.add_location_checkbox.pack(anchor='nw', pady=(0, 5))
+    
+    def create_Canvas(self):
         # Create a frame for the canvas and scrollbars
-        canvas_frame = tk.Frame(master)
+        canvas_frame = tk.Frame(self.master)
         canvas_frame.pack(fill=tk.BOTH, expand=True)
 
         # Configure the grid
@@ -86,27 +142,7 @@ class ParticleLabelingApp:
         h_scroll = tk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
         h_scroll.grid(row=1, column=0, sticky='ew')
         self.canvas.configure(xscrollcommand=h_scroll.set)
-
-        # Label status
-        self.status = tk.Label(master, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        self.status.pack(side=tk.BOTTOM, fill=tk.X)
-
-        # Variables
-        self.original_image = None
-        self.resized_image = None
-        self.display_image = None
-        self.image_id = None
-        self.particles = []
-        self.current_pair = None
-        self.pair_index = -1
-
-        # Initialize list to store labels
-        self.labels = []
-        self.labels_per_image = 100
-
-        if self.isDev:
-            self.load_image()
-
+        
     def load_image(self):
         if self.isDev:
             self.image_path = "E:\\hopper\\Images\\N=24\\theta=60\\wd=10cm\\A0010609.tif"
@@ -122,11 +158,11 @@ class ParticleLabelingApp:
         # Load and resize image for display
         masked_image_path = self.image_path.replace(self.image_ext, '_masked.tif')
         img = cv2.imread(masked_image_path)
-        img = cv2.resize(img, None, fx=self.resize_scale, fy=self.resize_scale, interpolation=cv2.INTER_AREA)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert to RGB for Tkinter
+        img_rsz = cv2.resize(img, None, fx=self.zoom_level, fy=self.zoom_level, interpolation=cv2.INTER_AREA)
+        img_rsz_rgb = cv2.cvtColor(img_rsz, cv2.COLOR_BGR2RGB)  # Convert to RGB for Tkinter
         
-        self.original_image = Image.fromarray(img_rgb)
-        self.resized_image = self.original_image  # Initialize resized image
+        self.original_image = Image.fromarray(img)
+        self.resized_image = Image.fromarray(img_rsz_rgb)  # Initialize resized image
         self.display_image = ImageTk.PhotoImage(image=self.resized_image)
 
         self.canvas.config(width=img.shape[1], height=img.shape[0])
@@ -194,7 +230,7 @@ class ParticleLabelingApp:
         max_distance = 50  # Maximum pixel distance to consider
         pairs = []
         checked_pairs = set()
-
+        self.finding_pairs = True
         processed_pairs = 0
 
         particles_array = cp.array(self.particles)  # Convert particles to GPU array
@@ -216,7 +252,8 @@ class ParticleLabelingApp:
                 if processed_pairs % 100 == 0:  # Update status every 100 pairs
                     self.status.config(text=f"Processed {processed_pairs} pairs")
                     self.master.update_idletasks()
-
+        
+        self.finding_pairs = False
         self.pairs = pairs  # Save the pairs to self.pairs
         self.init_labels()  # Initialize labels for each pair
         self.pair_index = -1  # Reset pair index
@@ -250,13 +287,10 @@ class ParticleLabelingApp:
         self.draw_pair(self.current_pair)
 
     def draw_pair(self, pair):
-        (org_x1, org_y1), (org_x2, org_y2) = pair
-        # Convert particle coordinates to canvas coordinates
-        x1 = org_x1 * self.resize_scale
-        y1 = org_y1 * self.resize_scale
-        x2 = org_x2 * self.resize_scale
-        y2 = org_y2 * self.resize_scale
-        
+        if self.finding_pairs:
+            return
+        (x1, y1), (x2, y2) = pair
+                
         zoomed_x1 = x1 * self.zoom_level
         zoomed_y1 = y1 * self.zoom_level
         zoomed_x2 = x2 * self.zoom_level
@@ -268,34 +302,36 @@ class ParticleLabelingApp:
         if hasattr(self, 'overlay_image_id'):
             self.canvas.delete(self.overlay_image_id)
     
-        # Draw line between particles on the canvas (overlay)
+        # Draw line between particles on the canvas
         self.line_id = self.canvas.create_line(zoomed_x1, zoomed_y1, zoomed_x2, zoomed_y2, fill='red', width=2)
     
         # Calculate midpoint between particles
         mid_x = (x1 + x2) / 2
         mid_y = (y1 + y2) / 2
+        zoomed_mid_x = (zoomed_x1 + zoomed_x2) / 2
+        zoomed_mid_y = (zoomed_y1 + zoomed_y2) / 2
     
         # Define zoom level and crop radius
-        zoom_scale = 2  # Adjust zoom level as needed
-        crop_radius = 50  # Adjust crop radius as needed
+        overlay_zoom_scale = 2  # Adjust zoom level as needed
+        overlay_crop_radius = 50  # Adjust crop radius as needed
     
         # Calculate bounding box for cropping, centered at midpoint
-        min_x = max(0, int(mid_x - crop_radius))
-        min_y = max(0, int(mid_y - crop_radius))
-        max_x = min(self.original_image.width, int(mid_x + crop_radius))
-        max_y = min(self.original_image.height, int(mid_y + crop_radius))
+        min_x = max(0, int(mid_x - overlay_crop_radius))
+        min_y = max(0, int(mid_y - overlay_crop_radius))
+        max_x = min(self.original_image.width, int(mid_x + overlay_crop_radius))
+        max_y = min(self.original_image.height, int(mid_y + overlay_crop_radius))
     
         # Crop and zoom the image
         cropped_image = self.original_image.crop((min_x, min_y, max_x, max_y))
-        overlay_size = (int(cropped_image.width * zoom_scale), int(cropped_image.height * zoom_scale))
+        overlay_size = (int(cropped_image.width * overlay_zoom_scale), int(cropped_image.height * overlay_zoom_scale))
         overlay_image = cropped_image.resize(overlay_size, resample=Image.Resampling.LANCZOS)
     
         # Draw line between particles on the zoomed image
         draw_overlay = ImageDraw.Draw(overlay_image)
-        adj_x1 = (x1 - min_x) * zoom_scale
-        adj_y1 = (y1 - min_y) * zoom_scale
-        adj_x2 = (x2 - min_x) * zoom_scale
-        adj_y2 = (y2 - min_y) * zoom_scale
+        adj_x1 = (x1 - min_x) * overlay_zoom_scale
+        adj_y1 = (y1 - min_y) * overlay_zoom_scale
+        adj_x2 = (x2 - min_x) * overlay_zoom_scale
+        adj_y2 = (y2 - min_y) * overlay_zoom_scale
         draw_overlay.line((adj_x1, adj_y1, adj_x2, adj_y2), fill="red", width=2)
     
         # Create circular mask
@@ -380,6 +416,7 @@ class ParticleLabelingApp:
             json.dump(data, f)
 
     def refresh_locations(self):
+        print("Refreshing locations")
         # Remove all particle locations
         self.canvas.delete('particle_location')
         # Redraw particle locations
@@ -388,12 +425,8 @@ class ParticleLabelingApp:
     def show_hide_locations(self):
         # Show or hide the particle locations on the canvas
         if self.show_locations.get():
-            if self.draw_locations_thread and self.draw_locations_thread.is_alive():
-                self.draw_locations_thread.join()                
-            self.draw_locations_thread = threading.Thread(target=self.draw_particle_locations)
-            self.draw_locations_thread.start()
+            self.draw_particle_locations()
         else:
-            # only remove the particles
             self.canvas.delete('particle_location')
             
     def draw_particle_locations(self):
@@ -404,8 +437,10 @@ class ParticleLabelingApp:
         y1 = self.canvas.canvasy(self.canvas.winfo_height())
         # Draw particle locations on the canvas
         for index, (orig_x, orig_y) in enumerate(self.particles):
+            
             x = orig_x * self.zoom_level
             y = orig_y * self.zoom_level
+            
             # Check if the particle is within the visible region
             if x0 <= x <= x1 and y0 <= y <= y1:
                 radius = 1.3
@@ -424,7 +459,7 @@ class ParticleLabelingApp:
         self.canvas.itemconfig(item, outline='red')
         # Store the selected particle's ID
         self.selected_particle = item
-        self.selected_particles.append(item)
+        # self.selected_particles.append(item)
 
     def remove_particle(self):
         # Remove the selected particle
