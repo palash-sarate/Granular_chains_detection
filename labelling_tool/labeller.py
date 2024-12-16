@@ -51,10 +51,6 @@ class ParticleLabelingApp:
         self.create_sideBar()
         self.create_topBar()
         self.create_Canvas()
-    
-        # Label status
-        self.status = tk.Label(master, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Variables
         self.original_image = None
@@ -69,13 +65,30 @@ class ParticleLabelingApp:
         self.labels = []
         self.labels_per_image = 100
 
+        # Bind the on_quit method to the window close event
+        self.master.protocol("WM_DELETE_WINDOW", self.on_quit)
+        
+        self.load_metadata()
+
         if self.isDev:
             self.load_image()
 
     def create_topBar(self):
-        # Create buttons for user input on button frame
-        button_frame = tk.Frame(self.master)
-        button_frame.pack()
+        # Create a frame for the top bar
+        top_bar_frame = tk.Frame(self.master)
+        top_bar_frame.pack(side=tk.TOP, fill=tk.X)
+        
+        # Create a frame for the status label and pack it to the left
+        status_frame = tk.Frame(top_bar_frame, width=200)
+        status_frame.pack(side=tk.LEFT, fill=tk.X)
+        
+        # Status label
+        self.status = tk.Label(status_frame, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Create a frame for the buttons and pack it to the center
+        button_frame = tk.Frame(top_bar_frame)
+        button_frame.pack(side=tk.TOP)
         
         # Load Image and JSON
         self.load_button = tk.Button(button_frame, text="Load Image", command=self.load_image)
@@ -110,11 +123,12 @@ class ParticleLabelingApp:
     def create_sideBar(self):
         on = tk.PhotoImage(file = "./labelling_tool/on.png")
         off = tk.PhotoImage(file = "./labelling_tool/off.png")
+        widget_width = 20  # Set a fixed width for all widgets
         # Create a frame on the left side
         self.left_frame = tk.Frame(self.master)
         self.left_frame.pack(side=tk.LEFT, fill=tk.Y, pady=50)
         
-        visibility_label = tk.Label(self.left_frame, text="Show Particle Locations")
+        visibility_label = tk.Label(self.left_frame, text="Show Particle Locations", width=widget_width)
         visibility_label.pack()            
         # Initialize show_locations as a BooleanVar
         self.show_locations = tk.BooleanVar(value=False)  # Start with particles visible
@@ -158,6 +172,60 @@ class ParticleLabelingApp:
         )
         self.add_location_toggle.pack(anchor='nw', pady=(0, 5))
         Tooltip(self.add_location_toggle, "Once on click on the canvas to add a particle")
+        
+        # clear selection button
+        self.clear_selection_button = tk.Button(self.left_frame,
+                                                text="Clear Selection", 
+                                                command=self.clear_particle_selection, width=widget_width)
+        self.clear_selection_button.pack(anchor='nw', pady=(0, 5))
+        Tooltip(self.clear_selection_button, "Clear the selected particle")
+        
+        # mark currentlly selected particle as a chain
+        self.mark_chain_button = tk.Button(self.left_frame,
+                                             text="Mark Chain",
+                                                command=self.mark_chain, width=widget_width)
+        self.mark_chain_button.pack(anchor='nw', pady=(0, 5))
+        Tooltip(self.mark_chain_button, "Mark the selected particles as a chain")
+        
+        # Dropdown to select the chain length
+        self.chain_length = tk.IntVar(value=1)
+        self.chain_length_label = tk.Label(self.left_frame, text="Chain Length", width=widget_width)
+        self.chain_length_label.pack(anchor='nw', pady=(0, 5))
+        self.chain_length_dropdown = tk.OptionMenu(self.left_frame, self.chain_length, 1, 4, 12, 24, 48)
+        self.chain_length_dropdown.config(width=widget_width-3)
+        self.chain_length_dropdown.pack(anchor='nw', pady=(0, 5))
+        Tooltip(self.chain_length_dropdown, "Select the chain length")
+    
+    def save_metadata(self):
+        # Save metadata to a JSON file
+        metadata = {
+            'image_path': self.image_path,
+            'image_name': self.image_name,
+            'zoom_level': self.zoom_level,
+            'overlay_position': self.overlay_position,
+            'labels_per_image': self.labels_per_image
+        }
+        with open('./labelling_tool/metadata.json', 'w') as f:
+            json.dump(metadata, f)
+        
+    def load_metadata(self):
+        # Load metadata from a JSON file
+        try:
+            with open('./labelling_tool/metadata.json', 'r') as f:
+                metadata = json.load(f)
+                self.image_path = metadata['image_path']
+                self.image_name = metadata['image_name']
+                self.zoom_level = metadata['zoom_level']
+                self.overlay_position = metadata['overlay_position']
+                self.labels_per_image = metadata['labels_per_image']
+        except FileNotFoundError:
+            self.status.config(text="Metadata file not found.")
+        except json.JSONDecodeError:
+            self.status.config(text="Error decoding metadata file.")
+    
+    def on_quit(self):
+        self.save_metadata()
+        self.master.quit()      
     
     def create_Canvas(self):
         # Create a frame for the canvas and scrollbars
@@ -527,7 +595,31 @@ class ParticleLabelingApp:
         y = event.y / self.zoom_level
         self.particles.append((x, y))
         self.draw_particle_locations()
-            
+    
+    def mark_chain(self):
+        # Mark the selected particles as a chain
+        if hasattr(self, 'selected_particle'):
+            # Get the index of the selected particle
+            tags = self.canvas.gettags(self.selected_particle)
+            for tag in tags:
+                if tag.startswith('particle_'):
+                    index = int(tag.split('_')[1])
+                    break
+            # Get the chain length
+            chain_length = self.chain_length.get()
+            # Get the selected particle's coordinates
+            x, y = self.particles[index]
+            # Get the chain particles
+            chain_particles = self.particles[index+1:index+chain_length]
+            # Store the chain in the labels
+            self.labels[self.pair_index]['chain'] = [(x, y)] + chain_particles
+            # Refresh the locations
+            self.refresh_locations()
+            # Clear the selection
+            self.clear_particle_selection()
+        else:
+            self.status.config(text="No particle selected.")
+    
     def clear_particle_selection(self):
         # Clear the selected particle
         if hasattr(self, 'selected_particle'):
