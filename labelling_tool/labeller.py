@@ -73,46 +73,62 @@ class ParticleLabelingApp:
         self.not_connected_button = tk.Button(button_frame, text="Save Data", command=self.save_data)
         self.not_connected_button.pack(side=tk.LEFT)
     
+    def toggle_switch(self, state, button, callback, on, off):
+        state.set(not state.get())
+        if state.get():
+            button.config(image=on)
+        else:
+            button.config(image=off)
+        callback()
+        
     def create_sideBar(self):
+        on = tk.PhotoImage(file = "./labelling_tool/on.png")
+        off = tk.PhotoImage(file = "./labelling_tool/off.png")
         # Create a frame on the left side
         self.left_frame = tk.Frame(self.master)
         self.left_frame.pack(side=tk.LEFT, fill=tk.Y, pady=50)
         
+        visibility_label = tk.Label(self.left_frame, text="Show Particle Locations")
+        visibility_label.pack()            
         # Initialize show_locations as a BooleanVar
-        self.show_locations = tk.BooleanVar(value=True)  # Start with particles visible
+        self.show_locations = tk.BooleanVar(value=False)  # Start with particles visible
         # Create a checkbox to toggle particle visibility
-        self.visibility_checkbox = tk.Checkbutton(
-            self.left_frame,
-            text="Show Particle Locations",
-            variable=self.show_locations,
-            command=self.show_hide_locations,
-            style='Toggle.TButton'
+        self.visibility_toggle = tk.Button(
+            self.left_frame,image = off,
+            command=lambda: self.toggle_switch(self.show_locations,
+                                       self.visibility_toggle, 
+                                       self.show_hide_locations, 
+                                       on, off)          
         )
-        self.visibility_checkbox.pack(anchor='nw', pady=(0, 5))
+        self.visibility_toggle.pack(anchor='nw', pady=(0, 5))
         
+        delete_label = tk.Label(self.left_frame,text="Delete Particle Location")
+        delete_label.pack()   
         # Initialize delete location as a BooleanVar
-        self.deleting_locations = tk.BooleanVar(value=True)  # Start with particles visible
+        self.deleting_locations = tk.BooleanVar(value=False)  # Start with particles visible
         # Create a checkbox to toggle delete functionality
-        self.delete_location_checkbox = tk.Checkbutton(
-            self.left_frame,
-            text="Delete Particle Location",
-            variable=self.deleting_locations,
-            # command=self.delete_locations,
-            style='Toggle.TButton'
+        self.delete_location_toggle = tk.Button(
+            self.left_frame,image = off,
+            command=lambda: self.toggle_switch(self.deleting_locations,
+                                       self.delete_location_toggle, 
+                                       self.delete_locations, 
+                                       on, off),            
         )
-        self.delete_location_checkbox.pack(anchor='nw', pady=(0, 5))
+        self.delete_location_toggle.pack(anchor='nw', pady=(0, 5))
         
+        add_label = tk.Label(self.left_frame,text="Add Particle Location")
+        add_label.pack() 
         # Initialize delete location as a BooleanVar
-        self.adding_locations = tk.BooleanVar(value=True)  # Start with particles visible
+        self.adding_locations = tk.BooleanVar(value=False)  # Start with particles visible
         # Create a checkbox to toggle add functionality
-        self.add_location_checkbox = tk.Checkbutton(
-            self.left_frame,
-            text="Add Particle Location",
-            variable=self.adding_locations,
-            # command=self.add_locations,
-            style='Toggle.TButton'
+        self.add_location_toggle = tk.Button(
+            self.left_frame,image = off,
+            command=lambda: self.toggle_switch(self.adding_locations,
+                                       self.add_location_toggle, 
+                                       self.add_locations, 
+                                       on, off),            
         )
-        self.add_location_checkbox.pack(anchor='nw', pady=(0, 5))
+        self.add_location_toggle.pack(anchor='nw', pady=(0, 5))
     
     def create_Canvas(self):
         # Create a frame for the canvas and scrollbars
@@ -461,7 +477,7 @@ class ParticleLabelingApp:
         self.selected_particle = item
         # self.selected_particles.append(item)
 
-    def remove_particle(self):
+    def delete_locations(self):
         # Remove the selected particle
         if hasattr(self, 'selected_particle'):
             # Delete from canvas
@@ -475,6 +491,13 @@ class ParticleLabelingApp:
                     break
             # Remove the attribute
             del self.selected_particle
+
+    def add_locations(self):
+        # Add a new particle location
+        x = event.x / self.zoom_level
+        y = event.y / self.zoom_level
+        self.particles.append((x, y))
+        self.draw_particle_locations()
             
     def clear_particle_selection(self):
         # Clear the selected particle
