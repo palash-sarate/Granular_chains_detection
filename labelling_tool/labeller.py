@@ -64,6 +64,7 @@ class ParticleLabelingApp:
         # Initialize list to store labels
         self.labels = []
         self.labels_per_image = 100
+        self.selected_particles = []
 
         # Bind the on_quit method to the window close event
         self.master.protocol("WM_DELETE_WINDOW", self.on_quit)
@@ -330,10 +331,8 @@ class ParticleLabelingApp:
 
         # Adjust the scroll region
         self.canvas.configure(scrollregion=self.canvas.bbox(self.image_id))
-        
-        # redraw the pair
-        if hasattr(self, 'current_pair'):
-            self.draw_pair(self.current_pair)
+        self.draw_line_over_image()
+        self.refresh_locations()
         
     def start_find_pairs_thread(self):
         thread = threading.Thread(target=self.find_pairs)
@@ -476,7 +475,7 @@ class ParticleLabelingApp:
             image=self.overlay_image_tk, 
             anchor=tk.CENTER
             )
-    
+
         # Make the overlay movable
         self.canvas.tag_bind(self.overlay_image_id, '<ButtonPress-1>', self.on_overlay_press)
         self.canvas.tag_bind(self.overlay_image_id, '<B1-Motion>', self.on_overlay_motion)
@@ -521,11 +520,11 @@ class ParticleLabelingApp:
             new_y = self.image_start_y + dy
             
             self.canvas.coords(self.image_id, min(0,new_x), min(0,new_y))
-            self.draw_line_over_image()
             
     def on_pan_stop(self, event):
+        self.draw_line_over_image()
         self.refresh_locations()
-            
+
     def init_labels(self):
         # Initialize labels for each pair as not connected
         self.labels = [{'locations': pair, 'connected': None} for pair in self.pairs]
@@ -555,6 +554,11 @@ class ParticleLabelingApp:
         # Redraw particle locations
         self.show_hide_locations()
     
+    def paint_selected_particles(self):
+        for particle_id in self.selected_particles:
+            self.canvas.itemconfig(particle_id, outline='red', fill='red')
+        print(f"Painted selected particles: {self.selected_particles}")
+    
     def show_hide_locations(self):
         # Show or hide the particle locations on the canvas
         if self.show_locations.get():
@@ -573,6 +577,9 @@ class ParticleLabelingApp:
             
             x = orig_x * self.zoom_level
             y = orig_y * self.zoom_level
+            # adjust by image location
+            x += self.canvas.coords(self.image_id)[0]
+            y += self.canvas.coords(self.image_id)[1]
             
             # Check if the particle is within the visible region
             if x0 <= x <= x1 and y0 <= y <= y1:
@@ -584,15 +591,20 @@ class ParticleLabelingApp:
                 )
                 # Bind click event to the particle
                 self.canvas.tag_bind(f'particle_{index}', '<Button-1>', self.on_particle_click)
-     
+        # Raise the overlay image to the top
+        self.canvas.tag_raise(self.overlay_image_id)
+        # Paint the selected particles
+        self.paint_selected_particles()
+        
     def on_particle_click(self, event):
         # Get the item that was clicked
         item = self.canvas.find_withtag('current')[0]
         # Highlight the selected particle
         self.canvas.itemconfig(item, outline='red')
         # Store the selected particle's ID
-        self.selected_particle = item
-        # self.selected_particles.append(item)
+        # self.selected_particle = item
+        self.selected_particles.append(item)
+        print(f"Selected particles: {self.selected_particles}")
 
     def delete_locations(self):
         # Remove the selected particle
@@ -634,17 +646,19 @@ class ParticleLabelingApp:
             # Store the chain in the labels
             self.labels[self.pair_index]['chain'] = [(x, y)] + chain_particles
             # Refresh the locations
-            self.refresh_locations()
+            # self.refresh_locations()
             # Clear the selection
             self.clear_particle_selection()
         else:
             self.status.config(text="No particle selected.")
     
     def clear_particle_selection(self):
+        self.selected_particles = []
+        print(f"cleared Selected particles: {self.selected_particles}")
         # Clear the selected particle
-        if hasattr(self, 'selected_particle'):
-            self.canvas.itemconfig(self.selected_particle, outline='blue')
-            del self.selected_particle
+        # if hasattr(self, 'selected_particle'):
+        #     self.canvas.itemconfig(self.selected_particle, outline='blue')
+        #     del self.selected_particle
                        
 if __name__ == "__main__":
     root = tk.Tk()
