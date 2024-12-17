@@ -399,30 +399,42 @@ class ParticleLabelingApp:
         print(f"Pair index: {self.pair_index} of {len(self.pairs) - 1}")            
         self.draw_pair(self.current_pair)
 
-    def draw_pair(self, pair):
-        if self.finding_pairs:
-            return
-        (x1, y1), (x2, y2) = pair
-                
+    def draw_line_over_image(self):
+        (x1, y1), (x2, y2) = self.current_pair
+                        
         zoomed_x1 = x1 * self.zoom_level
         zoomed_y1 = y1 * self.zoom_level
         zoomed_x2 = x2 * self.zoom_level
         zoomed_y2 = y2 * self.zoom_level
         
+        # adjust by image location
+        zoomed_x1 += self.canvas.coords(self.image_id)[0]
+        zoomed_y1 += self.canvas.coords(self.image_id)[1]
+        zoomed_x2 += self.canvas.coords(self.image_id)[0]
+        zoomed_y2 += self.canvas.coords(self.image_id)[1]
+        
         # Clear previous overlays
         if hasattr(self, 'line_id'):
             self.canvas.delete(self.line_id)
+            
+        # Draw line between particles on the canvas
+        self.line_id = self.canvas.create_line(zoomed_x1, zoomed_y1, zoomed_x2, zoomed_y2, fill='red', width=2)
+        
+        # print(f"Drawing line between particles: ({x1}, {y1}) and ({x2}, {y2})")
+
+    def draw_pair(self, pair):
+        if self.finding_pairs:
+            return
+        (x1, y1), (x2, y2) = pair
+
         if hasattr(self, 'overlay_image_id'):
             self.canvas.delete(self.overlay_image_id)
     
-        # Draw line between particles on the canvas
-        self.line_id = self.canvas.create_line(zoomed_x1, zoomed_y1, zoomed_x2, zoomed_y2, fill='red', width=2)
+        self.draw_line_over_image()
     
         # Calculate midpoint between particles
         mid_x = (x1 + x2) / 2
         mid_y = (y1 + y2) / 2
-        zoomed_mid_x = (zoomed_x1 + zoomed_x2) / 2
-        zoomed_mid_y = (zoomed_y1 + zoomed_y2) / 2
     
         # Define zoom level and crop radius
         overlay_zoom_scale = 2  # Adjust zoom level as needed
@@ -494,14 +506,22 @@ class ParticleLabelingApp:
         self.dragging_overlay = False
     
     def start_pan(self, event):
-        # Record the current canvas position
-        if self.dragging_overlay is False:            
-            self.canvas.scan_mark(event.x, event.y)
-
-    def pan_image(self, event):
-        # Move the canvas to the new position
+        # Record the current mouse position
         if self.dragging_overlay is False:
-            self.canvas.scan_dragto(event.x, event.y, gain=1)
+            self.pan_start_x = event.x
+            self.pan_start_y = event.y
+            self.image_start_x, self.image_start_y = self.canvas.coords(self.image_id)
+    
+    def pan_image(self, event):
+        # Move the image to the new position
+        if self.dragging_overlay is False:
+            dx = event.x - self.pan_start_x
+            dy = event.y - self.pan_start_y
+            new_x = self.image_start_x + dx
+            new_y = self.image_start_y + dy
+            
+            self.canvas.coords(self.image_id, min(0,new_x), min(0,new_y))
+            self.draw_line_over_image()
             
     def on_pan_stop(self, event):
         self.refresh_locations()
