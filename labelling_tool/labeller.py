@@ -168,7 +168,7 @@ class ParticleLabelingApp:
             self.left_frame,image = off,
             command=lambda: self.toggle_switch(self.adding_locations,
                                        self.add_location_toggle, 
-                                       self.add_locations, 
+                                       self.toggle_adding_locations, 
                                        on, off),            
         )
         self.add_location_toggle.pack(anchor='nw', pady=(0, 5))
@@ -505,6 +505,7 @@ class ParticleLabelingApp:
         self.dragging_overlay = False
     
     def start_pan(self, event):
+        print("Starting pan")
         # Record the current mouse position
         if self.dragging_overlay is False:
             self.pan_start_x = event.x
@@ -550,7 +551,7 @@ class ParticleLabelingApp:
     def refresh_locations(self):
         print("Refreshing locations")
         # Remove all particle locations
-        self.canvas.delete('particle_location')
+        self.clear_all_locations()
         # Redraw particle locations
         self.show_hide_locations()
     
@@ -565,8 +566,12 @@ class ParticleLabelingApp:
         if self.show_locations.get():
             self.draw_particle_locations()
         else:
-            self.canvas.delete('particle_location')
+            self.clear_all_locations()
             
+    def clear_all_locations(self):
+        self.canvas.delete('particle_location')
+        self.canvas.delete('particle_click_region')
+                
     def draw_particle_locations(self, particles = None):
         if particles is None:
             particles = self.particles
@@ -606,7 +611,7 @@ class ParticleLabelingApp:
         # Create an invisible oval for the clickable region
         self.canvas.create_oval(
             x - self.click_radius, y - self.click_radius, x + self.click_radius, y + self.click_radius,
-            outline='', fill='', tags=(f'clickable_particle_{index}',)
+            outline='', fill='', tags=(f'clickable_particle_{index}','particle_click_region')
         )
         # Bind click event to the particle
         self.canvas.tag_bind(f'clickable_particle_{index}', '<Button-1>', lambda event, idx=index: self.on_particle_click(event, idx))
@@ -634,6 +639,7 @@ class ParticleLabelingApp:
             self.deleted_particles = [particle for index, particle in enumerate(self.particles) if index in self.selected_particles] 
             # delete the elements from self.particles at indexes from self.selected_particles
             self.particles = [particle for index, particle in enumerate(self.particles) if index not in self.selected_particles]
+            self.selected_particles = []
             self.refresh_locations()
         else:
             self.status.config(text="No particles selected.")
@@ -649,13 +655,23 @@ class ParticleLabelingApp:
         else:
             self.status.config(text="Nothing to undo.")
 
-    def add_locations(self):
+    def toggle_adding_locations(self):
+        print("Toggling adding locations: ", self.adding_locations.get())
         # Add a new particle location
-        x = event.x / self.zoom_level
-        y = event.y / self.zoom_level
+        if self.adding_locations.get():
+            self.canvas.bind('<Button-1>', self.add_location)
+        else:
+            self.canvas.unbind('<Button-1>')
+            self.canvas.bind('<ButtonPress-1>', self.start_pan)
+
+    def add_location(self, event):
+        # Add a new particle location
+        x = (event.x - self.canvas.coords(self.image_id)[0]) / self.zoom_level
+        y = (event.y - self.canvas.coords(self.image_id)[1]) / self.zoom_level
         self.particles.append((x, y))
-        self.draw_particle_locations()
-    
+        self.refresh_locations()
+        print(f"Added particle at: ({x}, {y})")
+
     def mark_chain(self):
         # Mark the selected particles as a chain
         if hasattr(self, 'selected_particle'):
