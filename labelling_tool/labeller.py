@@ -47,7 +47,6 @@ class ParticleLabelingApp:
         self.overlay_position = (200, 200)
         self.dragging_overlay = False
         
-
         self.create_sideBar()
         self.create_topBar()
         self.create_Canvas()
@@ -60,6 +59,7 @@ class ParticleLabelingApp:
         self.particles = []
         self.current_pair = None
         self.pair_index = -1
+        self.click_radius = 5  # Radius for clickable particle locations in pixels
 
         # Initialize list to store labels
         self.labels = []
@@ -259,7 +259,7 @@ class ParticleLabelingApp:
         
     def load_image(self):
         if self.isDev:
-            self.image_path = "E:\\hopper\\Images\\N=24\\theta=60\\wd=10cm\\A0010609.tif"
+            self.image_path = "F:\\hopper\\Images\\N=24\\theta=60\\wd=10cm\\A0010609.tif"
         else:
             self.image_path = filedialog.askopenfilename()
         if not self.image_path:
@@ -554,10 +554,11 @@ class ParticleLabelingApp:
         # Redraw particle locations
         self.show_hide_locations()
     
-    def paint_selected_particles(self):
-        for particle_id in self.selected_particles:
-            self.canvas.itemconfig(particle_id, outline='red', fill='red')
-        print(f"Painted selected particles: {self.selected_particles}")
+    # def paint_selected_particles(self):
+    #     for particle_id in self.selected_particles:
+    #         # print(self.canvas.itemconfig(particle_id))
+    #         self.canvas.itemconfig(particle_id, outline='red', fill='red')
+    #     print(f"Painted selected particles: {self.selected_particles}")
     
     def show_hide_locations(self):
         # Show or hide the particle locations on the canvas
@@ -566,15 +567,16 @@ class ParticleLabelingApp:
         else:
             self.canvas.delete('particle_location')
             
-    def draw_particle_locations(self):
+    def draw_particle_locations(self, particles = None):
+        if particles is None:
+            particles = self.particles
         # Get the visible region of the canvas in canvas coordinates
         x0 = self.canvas.canvasx(0)
         y0 = self.canvas.canvasy(0)
         x1 = self.canvas.canvasx(self.canvas.winfo_width())
         y1 = self.canvas.canvasy(self.canvas.winfo_height())
         # Draw particle locations on the canvas
-        for index, (orig_x, orig_y) in enumerate(self.particles):
-            
+        for index, (orig_x, orig_y) in enumerate(self.particles):         
             x = orig_x * self.zoom_level
             y = orig_y * self.zoom_level
             # adjust by image location
@@ -583,43 +585,69 @@ class ParticleLabelingApp:
             
             # Check if the particle is within the visible region
             if x0 <= x <= x1 and y0 <= y <= y1:
-                radius = 1.3
-                self.canvas.create_oval(
-                    x - radius, y - radius, x + radius, y + radius, 
-                    fill='blue', outline='blue',
-                    tags=('particle_location', f'particle_{index}')
-                )
-                # Bind click event to the particle
-                self.canvas.tag_bind(f'particle_{index}', '<Button-1>', self.on_particle_click)
+                self.draw_particle(index, x, y)
+
         # Raise the overlay image to the top
         self.canvas.tag_raise(self.overlay_image_id)
-        # Paint the selected particles
-        self.paint_selected_particles()
         
-    def on_particle_click(self, event):
+    def draw_particle(self,index, x, y):
+        radius = 1.3
+        if index in self.selected_particles:
+            outline = 'red'
+            fill = 'red'
+        else:
+            outline = 'blue'
+            fill = 'blue'
+        self.canvas.create_oval(
+            x - radius, y - radius, x + radius, y + radius, 
+            fill=fill, outline=outline,
+            tags=('particle_location', f'particle_{index}')
+        )
+        # Create an invisible oval for the clickable region
+        self.canvas.create_oval(
+            x - self.click_radius, y - self.click_radius, x + self.click_radius, y + self.click_radius,
+            outline='', fill='', tags=(f'clickable_particle_{index}',)
+        )
+        # Bind click event to the particle
+        self.canvas.tag_bind(f'clickable_particle_{index}', '<Button-1>', lambda event, idx=index: self.on_particle_click(event, idx))
+        # Bind enter and leave events to change the cursor
+        self.canvas.tag_bind(f'clickable_particle_{index}', '<Enter>', lambda event: self.canvas.config(cursor='hand2'))
+        self.canvas.tag_bind(f'clickable_particle_{index}', '<Leave>', lambda event: self.canvas.config(cursor=''))
+        
+    def on_particle_click(self, event, index):
         # Get the item that was clicked
-        item = self.canvas.find_withtag('current')[0]
+        item = self.canvas.find_withtag(f'particle_{index}')[0]
         # Highlight the selected particle
-        self.canvas.itemconfig(item, outline='red')
+        self.canvas.itemconfig(item, outline='red', fill='red')
         # Store the selected particle's ID
         # self.selected_particle = item
-        self.selected_particles.append(item)
+        if index not in self.selected_particles:
+            self.selected_particles.append(index)
+        else:
+            self.selected_particles.remove(index)
         print(f"Selected particles: {self.selected_particles}")
 
     def delete_locations(self):
-        # Remove the selected particle
-        if hasattr(self, 'selected_particle'):
-            # Delete from canvas
-            self.canvas.delete(self.selected_particle)
-            # Remove from self.particles list
-            tags = self.canvas.gettags(self.selected_particle)
-            for tag in tags:
-                if tag.startswith('particle_'):
-                    index = int(tag.split('_')[1])
-                    self.particles.pop(index)
-                    break
-            # Remove the attribute
-            del self.selected_particle
+        if hasattr(self, 'selected_particles'):
+            # Remove the selected particle locations
+            # store the particles to be deleted for undo
+            self.deleted_particles = [particle for index, particle in enumerate(self.particles) if index in self.selected_particles] 
+            # delete the elements from self.particles at indexes from self.selected_particles
+            self.particles = [particle for index, particle in enumerate(self.particles) if index not in self.selected_particles]
+            self.refresh_locations()
+        else:
+            self.status.config(text="No particles selected.")
+    
+    def undo_delete(self):
+        # Undo the last delete operation
+        # but the deleted particles are now restored to the list at the end
+        # change the logic to restore the particles at the same index if required
+        if hasattr(self, 'deleted_particles'):
+            self.particles += self.deleted_particles
+            self.refresh_locations()
+            self.deleted_particles = []
+        else:
+            self.status.config(text="Nothing to undo.")
 
     def add_locations(self):
         # Add a new particle location
@@ -655,10 +683,7 @@ class ParticleLabelingApp:
     def clear_particle_selection(self):
         self.selected_particles = []
         print(f"cleared Selected particles: {self.selected_particles}")
-        # Clear the selected particle
-        # if hasattr(self, 'selected_particle'):
-        #     self.canvas.itemconfig(self.selected_particle, outline='blue')
-        #     del self.selected_particle
+        self.refresh_locations()
                        
 if __name__ == "__main__":
     root = tk.Tk()
