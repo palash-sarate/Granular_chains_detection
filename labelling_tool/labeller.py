@@ -7,7 +7,10 @@ import csv
 import cv2
 import threading  # Import threading module
 import cupy as cp  # Import cupy for GPU computations
+import numpy as np
 # import math
+import pandas as pd
+
 class Tooltip:
     def __init__(self, widget, text):
         self.widget = widget
@@ -56,7 +59,6 @@ class ParticleLabelingApp:
         self.resized_image = None
         self.display_image = None
         self.image_id = None
-        self.particles = []
         self.current_pair = None
         self.pair_index = -1
         self.click_radius = 5  # Radius for clickable particle locations in pixels
@@ -65,6 +67,7 @@ class ParticleLabelingApp:
         self.labels = []
         self.labels_per_image = 100
         self.selected_particles = []
+        self.deleted_particles = []
 
         # Bind the on_quit method to the window close event
         self.master.protocol("WM_DELETE_WINDOW", self.on_quit)
@@ -144,24 +147,24 @@ class ParticleLabelingApp:
         self.visibility_toggle.pack(anchor='nw', pady=(0, 5))
         Tooltip(self.visibility_toggle, "Toggle particle visibility")
         
-        delete_label = tk.Label(self.left_frame,text="Delete Particle Location")
-        delete_label.pack()   
-        # Initialize delete location as a BooleanVar
-        self.deleting_locations = tk.BooleanVar(value=False)  # Start with particles visible
-        # Create a checkbox to toggle delete functionality
-        self.delete_location_toggle = tk.Button(
+        chains_visibility_label = tk.Label(self.left_frame, text="Show Chains", width=widget_width)
+        chains_visibility_label.pack()            
+        # Initialize show_locations as a BooleanVar
+        self.draw_chains_toggle = tk.BooleanVar(value=False)  # Start with particles visible
+        # Create a checkbox to toggle particle visibility
+        self.chains_visibility_toggle = tk.Button(
             self.left_frame,image = off,
-            command=lambda: self.toggle_switch(self.deleting_locations,
-                                       self.delete_location_toggle, 
-                                       self.delete_locations, 
-                                       on, off),            
+            command=lambda: self.toggle_switch(self.draw_chains_toggle,
+                                       self.chains_visibility_toggle, 
+                                       self.draw_chains, 
+                                       on, off)          
         )
-        self.delete_location_toggle.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.delete_location_toggle, "Once on click on a particle to delete")
+        self.chains_visibility_toggle.pack(anchor='nw', pady=(0, 5))
+        Tooltip(self.chains_visibility_toggle, "Toggle chains visibility")
         
         add_label = tk.Label(self.left_frame,text="Add Particle Location")
         add_label.pack() 
-        # Initialize delete location as a BooleanVar
+        # Initialize add location as a BooleanVar
         self.adding_locations = tk.BooleanVar(value=False)  # Start with particles visible
         # Create a checkbox to toggle add functionality
         self.add_location_toggle = tk.Button(
@@ -174,6 +177,16 @@ class ParticleLabelingApp:
         self.add_location_toggle.pack(anchor='nw', pady=(0, 5))
         Tooltip(self.add_location_toggle, "Once on click on the canvas to add a particle")
         
+        # Create a checkbox to toggle delete functionality
+        self.delete_location_toggle = tk.Button(
+            self.left_frame, 
+            command=self.delete_locations,
+            text="Delete Selection", 
+            width=widget_width
+            )
+        self.delete_location_toggle.pack(anchor='nw', pady=(0, 5))
+        Tooltip(self.delete_location_toggle, "Deleted selected particles")
+        
         # clear selection button
         self.clear_selection_button = tk.Button(self.left_frame,
                                                 text="Clear Selection", 
@@ -184,13 +197,20 @@ class ParticleLabelingApp:
         # mark currentlly selected particle as a chain
         self.mark_chain_button = tk.Button(self.left_frame,
                                              text="Mark Chain",
-                                                command=self.mark_chain, width=widget_width)
+                                            command=self.mark_chain, width=widget_width)
         self.mark_chain_button.pack(anchor='nw', pady=(0, 5))
         Tooltip(self.mark_chain_button, "Mark the selected particles as a chain")
         
+        # add text box to enter custom chain id
+        add_label = tk.Label(self.left_frame,text="Enter a custom chain id")
+        add_label.pack()
+        self.custom_chain_id = tk.Entry(self.left_frame, width=widget_width)
+        self.custom_chain_id.pack(anchor='nw', pady=(0, 5))
+        Tooltip(self.custom_chain_id, "Enter a custom chain id to mark to current selection")
+        
         # Dropdown to select the chain length
         self.chain_length = tk.IntVar(value=1)
-        self.chain_length_label = tk.Label(self.left_frame, text="Chain Length", width=widget_width)
+        self.chain_length_label = tk.Label(self.left_frame, text="Set Chain Length", width=widget_width)
         self.chain_length_label.pack(anchor='nw', pady=(0, 5))
         self.chain_length_dropdown = tk.OptionMenu(self.left_frame, self.chain_length, 1, 4, 12, 24, 48)
         self.chain_length_dropdown.config(width=widget_width-3)
@@ -289,23 +309,40 @@ class ParticleLabelingApp:
 
         # Load Particle locations
         csv_path = self.image_path.replace(self.image_ext, '_trackpy.csv')
-        print(csv_path)
+        pd_csv_path = f"./labelled_data/{self.image_name.replace(self.image_ext, '_data.csv')}"
+        print(f"pd_csv: {pd_csv_path}")
+        pd_csv_exists = os.path.exists(pd_csv_path)
+        
         try:
-            if os.path.exists(csv_path):
-                self.particles = []
-                with open(csv_path, 'r') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        self.particles.append((float(row['x']), float(row['y'])))
+            if pd_csv_exists:
+                # self.particles = pd.DataFrame(columns=['x', 'y','mass','size','ecc','signal','raw_mass','ep','isParticle','chainId','pairIds'])                        
+                self.particles = pd.read_csv(pd_csv_path)
+                print("Loaded pd_csv")
+                print(pd_csv_path)
+                self.start_find_pairs_thread()  # Start the find_pairs method in a new thread                
+            elif os.path.exists(csv_path):
+                print("Pd_csv not found, loading trackpy csv")
+                print(csv_path)
+                self.read_trackpy_csv(csv_path)
                 self.start_find_pairs_thread()  # Start the find_pairs method in a new thread
-                # self.show_next_pair()  # Show the first pair after processing
             else:
                 raise FileNotFoundError
         except FileNotFoundError:
             self.status.config(text="Warning: CSV file not found.")
         except json.JSONDecodeError:
             self.status.config(text="Warning: Error decoding CSV file.")
-        
+
+    def read_trackpy_csv(self, csv_path):
+        self.particles = pd.read_csv(csv_path)
+        self.particles['isParticle'] = True
+        self.particles['chainId'] = -1
+        self.particles['pairIds'] = [[] for _ in range(len(self.particles))]
+        self.particles['nonPairIds'] = [[] for _ in range(len(self.particles))]
+        self.particles['id'] = self.particles.index
+        # add attributes to the particles dataframe 
+        self.particles.attrs['image_path']= self.image_path
+        self.particles.attrs['trackpy_csv_path']= csv_path
+
     def zoom(self, event):
         # Determine the zoom factor based on scroll direction
         if event.delta > 0:
@@ -344,10 +381,10 @@ class ParticleLabelingApp:
         checked_pairs = set()
         self.finding_pairs = True
         processed_pairs = 0
+        x_y_columns = self.particles[['x', 'y']]
+        particles_array = cp.array(x_y_columns.values)  # Convert particles to GPU array
 
-        particles_array = cp.array(self.particles)  # Convert particles to GPU array
-
-        for i in range(len(self.particles)):
+        for i in range(10): #range(len(self.particles)):
             distances = cp.sqrt(cp.sum((particles_array[i] - particles_array[i+1:]) ** 2, axis=1))
             close_particles = cp.where(distances <= max_distance)[0]
 
@@ -357,7 +394,7 @@ class ParticleLabelingApp:
                 if (i, j) in checked_pairs or (j, i) in checked_pairs:
                     continue
 
-                pairs.append((tuple(self.particles[i]), tuple(self.particles[j])))
+                pairs.append((self.particles['id'][i], self.particles['id'][j]))
                 checked_pairs.add((i, j))
 
                 processed_pairs += 1
@@ -367,7 +404,6 @@ class ParticleLabelingApp:
         
         self.finding_pairs = False
         self.pairs = pairs  # Save the pairs to self.pairs
-        self.init_labels()  # Initialize labels for each pair
         self.pair_index = -1  # Reset pair index
         self.show_next_pair()  # Show the first pair after processing
 
@@ -399,7 +435,10 @@ class ParticleLabelingApp:
         self.draw_pair(self.current_pair)
 
     def draw_line_over_image(self):
-        (x1, y1), (x2, y2) = self.current_pair
+        particle_1 = self.particles[self.particles['id'] == self.current_pair[0]]
+        particle_2 = self.particles[self.particles['id'] == self.current_pair[1]]
+        (x1, y1) = particle_1[['x', 'y']].values[0] 
+        (x2, y2) = particle_2[['x', 'y']].values[0]
                         
         zoomed_x1 = x1 * self.zoom_level
         zoomed_y1 = y1 * self.zoom_level
@@ -424,7 +463,11 @@ class ParticleLabelingApp:
     def draw_pair(self, pair):
         if self.finding_pairs:
             return
-        (x1, y1), (x2, y2) = pair
+        
+        particle_1 = self.particles[self.particles['id'] == pair[0]]
+        particle_2 = self.particles[self.particles['id'] == pair[1]]
+        (x1, y1) = particle_1[['x', 'y']].values[0] 
+        (x2, y2) = particle_2[['x', 'y']].values[0]
 
         if hasattr(self, 'overlay_image_id'):
             self.canvas.delete(self.overlay_image_id)
@@ -505,7 +548,8 @@ class ParticleLabelingApp:
         self.dragging_overlay = False
     
     def start_pan(self, event):
-        print("Starting pan")
+        # Remove all particle locations
+        self.clear_all_locations() # this makes panning image much faster
         # Record the current mouse position
         if self.dragging_overlay is False:
             self.pan_start_x = event.x
@@ -523,30 +567,42 @@ class ParticleLabelingApp:
             self.canvas.coords(self.image_id, min(0,new_x), min(0,new_y))
             
     def on_pan_stop(self, event):
+        # print("Panning stopped")
         self.draw_line_over_image()
         self.refresh_locations()
-
-    def init_labels(self):
-        # Initialize labels for each pair as not connected
-        self.labels = [{'locations': pair, 'connected': None} for pair in self.pairs]
         
     def mark_connected(self):
-        # Store label for the current pair as connected
-        self.labels[self.pair_index]['connected'] = True
+        self.particles.loc[
+            self.particles['id'] == self.current_pair[0], 'pairIds'
+            ] = self.particles.loc[
+                self.particles['id'] == self.current_pair[0], 'pairIds'
+                ].apply(lambda lst: lst + [self.current_pair[1]])
+        self.particles.loc[
+            self.particles['id'] == self.current_pair[1], 'pairIds'
+            ] = self.particles.loc[
+                self.particles['id'] == self.current_pair[1], 'pairIds'
+                ].apply(lambda lst: lst + [self.current_pair[0]]) 
+
         self.show_next_pair()
 
     def mark_not_connected(self):
         # Store label for the current pair as not connected
-        self.labels[self.pair_index]['connected'] = False
+        self.particles.loc[
+            self.particles['id'] == self.current_pair[0], 'nonPairIds'
+            ] = self.particles.loc[
+                self.particles['id'] == self.current_pair[0], 'nonPairIds'
+                ].apply(lambda lst: lst + [self.current_pair[1]])
+        self.particles.loc[
+            self.particles['id'] == self.current_pair[1], 'nonPairIds'
+            ] = self.particles.loc[
+                self.particles['id'] == self.current_pair[1], 'nonPairIds'
+                ].apply(lambda lst: lst + [self.current_pair[0]]) 
+
         self.show_next_pair()
 
     def save_data(self):
-        # add image path to labels key name self.image_path
-        data = {'self.image_path': self.image_path}
-        data['labels'] = self.labels
-        # save data to json file
-        with open(f'labelled_data\\labels_{self.image_name.replace(self.image_ext, "")}.json', 'w') as f:
-            json.dump(data, f)
+        # save dataframe
+        self.particles.to_csv(f"./labelled_data/{self.image_name.replace(self.image_ext, '_data.csv')}", index=False)
 
     def refresh_locations(self):
         print("Refreshing locations")
@@ -554,12 +610,6 @@ class ParticleLabelingApp:
         self.clear_all_locations()
         # Redraw particle locations
         self.show_hide_locations()
-    
-    # def paint_selected_particles(self):
-    #     for particle_id in self.selected_particles:
-    #         # print(self.canvas.itemconfig(particle_id))
-    #         self.canvas.itemconfig(particle_id, outline='red', fill='red')
-    #     print(f"Painted selected particles: {self.selected_particles}")
     
     def show_hide_locations(self):
         # Show or hide the particle locations on the canvas
@@ -574,24 +624,44 @@ class ParticleLabelingApp:
                 
     def draw_particle_locations(self, particles = None):
         if particles is None:
-            particles = self.particles
+            particles = self.particles.copy()
         # Get the visible region of the canvas in canvas coordinates
         x0 = self.canvas.canvasx(0)
         y0 = self.canvas.canvasy(0)
         x1 = self.canvas.canvasx(self.canvas.winfo_width())
         y1 = self.canvas.canvasy(self.canvas.winfo_height())
-        # Draw particle locations on the canvas
-        for index, (orig_x, orig_y) in enumerate(self.particles):         
-            x = orig_x * self.zoom_level
-            y = orig_y * self.zoom_level
-            # adjust by image location
-            x += self.canvas.coords(self.image_id)[0]
-            y += self.canvas.coords(self.image_id)[1]
-            
-            # Check if the particle is within the visible region
-            if x0 <= x <= x1 and y0 <= y <= y1:
-                self.draw_particle(index, x, y)
+        
+        # Get image coordinates
+        image_coords = self.canvas.coords(self.image_id)
+        image_x, image_y = image_coords[0], image_coords[1]
 
+        # Precompute zoom level and image offset
+        zoom_level = self.zoom_level
+        
+        # Convert particle positions to canvas coordinates
+        cp_canvas_x = cp.asarray(particles['x']) * zoom_level + image_x
+        cp_canvas_y = cp.asarray(particles['y']) * zoom_level + image_y
+        # filter particles
+        cp_isParticle = cp.asarray(particles['isParticle'])
+        
+        particles['canvas_x'] = cp_canvas_x.get()
+        particles['canvas_y'] = cp_canvas_y.get()
+        particles['isParticle'] = cp_isParticle.get()
+
+        # Filter particles within the visible region
+        visible_particles_mask = (
+            (particles['canvas_x'] >= x0) & (particles['canvas_x'] <= x1) &
+            (particles['canvas_y'] >= y0) & (particles['canvas_y'] <= y1) &
+            (particles['isParticle'] == True)
+        )
+        visible_particles = particles[visible_particles_mask]
+        
+        # Draw particle locations on the canvas
+        for index, row in visible_particles.iterrows():
+            self.draw_particle(index, row['canvas_x'], row['canvas_y'])
+        # Draw chains if the toggle is on
+        if self.draw_chains_toggle.get():
+            self.draw_chains()
         # Raise the overlay image to the top
         self.canvas.tag_raise(self.overlay_image_id)
         
@@ -633,12 +703,10 @@ class ParticleLabelingApp:
         print(f"Selected particles: {self.selected_particles}")
 
     def delete_locations(self):
-        if hasattr(self, 'selected_particles'):
-            # Remove the selected particle locations
-            # store the particles to be deleted for undo
-            self.deleted_particles = [particle for index, particle in enumerate(self.particles) if index in self.selected_particles] 
-            # delete the elements from self.particles at indexes from self.selected_particles
-            self.particles = [particle for index, particle in enumerate(self.particles) if index not in self.selected_particles]
+        if hasattr(self, 'selected_particles') and self.selected_particles:
+            self.recently_deleted_particles = self.particles[self.particles['id'].isin(self.selected_particles)].copy()
+            self.deleted_particles.append(self.recently_deleted_particles)
+            self.particles.loc[self.particles['id'].isin(self.selected_particles), 'isParticle'] = False
             self.selected_particles = []
             self.refresh_locations()
         else:
@@ -649,14 +717,14 @@ class ParticleLabelingApp:
         # but the deleted particles are now restored to the list at the end
         # change the logic to restore the particles at the same index if required
         if hasattr(self, 'deleted_particles'):
-            self.particles += self.deleted_particles
+            self.particles += self.recently_deleted_particles
             self.refresh_locations()
-            self.deleted_particles = []
+            self.recently_deleted_particles = []
         else:
             self.status.config(text="Nothing to undo.")
 
     def toggle_adding_locations(self):
-        print("Toggling adding locations: ", self.adding_locations.get())
+        # print("Toggling adding locations: ", self.adding_locations.get())
         # Add a new particle location
         if self.adding_locations.get():
             self.canvas.bind('<Button-1>', self.add_location)
@@ -672,27 +740,68 @@ class ParticleLabelingApp:
         self.refresh_locations()
         print(f"Added particle at: ({x}, {y})")
 
+    def draw_chains(self):
+        # clear all chain outlines
+        self.canvas.delete('chain_outline')
+        if not self.draw_chains_toggle.get():
+            return
+        # Draw chains on the canvas
+        chain_ids = self.particles['chainId'].unique()
+        for chain_id in chain_ids:
+            if chain_id != -1:
+                self.draw_chain(chain_id)
+    
+    def draw_chain(self, chain_id):
+        # Draw a chain on the canvas
+        # Get the particles in the chain
+        chain_particles = self.particles[self.particles['chainId'] == chain_id]
+        # Get the particle locations
+        x_y_columns = chain_particles[['x', 'y']]
+        particles_array = cp.array(x_y_columns.values)
+        # Get the chain color
+        chain_color = self.get_chain_color(chain_id)
+        # Draw thick outline around the particles in the chain
+        for index, (x, y) in enumerate(particles_array):
+            canvas_x = x * self.zoom_level + self.canvas.coords(self.image_id)[0]
+            canvas_y = y * self.zoom_level + self.canvas.coords(self.image_id)[1]
+            radius = 5  # Adjust the radius for the outline
+            self.canvas.create_oval(
+            canvas_x - radius, canvas_y - radius, canvas_x + radius, canvas_y + radius,
+            outline=chain_color, width=3, tags='chain_outline'
+            )
+
+    def get_chain_color(self, chain_id):
+        """
+        Returns the same color string for each chain_id.
+        """
+        if not hasattr(self, 'chain_colors'):
+            self.chain_colors = {}
+        if chain_id not in self.chain_colors:
+            # Assign a new color, e.g. a hex code
+            # In production you might pick from a predefined list or generate a random new color
+            self.chain_colors[chain_id] = f"#{(hash(str(chain_id)) & 0xFFFFFF):06x}"
+        return self.chain_colors[chain_id]
+    
     def mark_chain(self):
         # Mark the selected particles as a chain
-        if hasattr(self, 'selected_particle'):
-            # Get the index of the selected particle
-            tags = self.canvas.gettags(self.selected_particle)
-            for tag in tags:
-                if tag.startswith('particle_'):
-                    index = int(tag.split('_')[1])
-                    break
+        if hasattr(self, 'selected_particles') and self.selected_particles:
             # Get the chain length
             chain_length = self.chain_length.get()
-            # Get the selected particle's coordinates
-            x, y = self.particles[index]
-            # Get the chain particles
-            chain_particles = self.particles[index+1:index+chain_length]
-            # Store the chain in the labels
-            self.labels[self.pair_index]['chain'] = [(x, y)] + chain_particles
-            # Refresh the locations
-            # self.refresh_locations()
-            # Clear the selection
-            self.clear_particle_selection()
+            # get the max of chainId column of self.particles dataframe
+            max_chain_id = self.particles['chainId'].max()
+            # check if selected particles are already in a chain
+            chains_ids = self.particles.loc[self.particles['id'].isin(self.selected_particles), 'chainId']
+            print(f"chains_ids: {chains_ids}")
+            # check if selected particles are already in a chain
+            if chains_ids.nunique() > 1 & chains_ids.nunique() != 1 & np.all(chains_ids.unique() != -1):
+                self.status.config(text="Some particles already marked in chains.")
+                return
+            if max_chain_id == -1 :
+                new_chain_id = 0
+            else :
+                new_chain_id = max_chain_id + 1
+            self.particles.loc[self.particles['id'].isin(self.selected_particles), 'chainId'] = new_chain_id
+            print("new chain id:",new_chain_id)
         else:
             self.status.config(text="No particle selected.")
     
@@ -700,7 +809,7 @@ class ParticleLabelingApp:
         self.selected_particles = []
         print(f"cleared Selected particles: {self.selected_particles}")
         self.refresh_locations()
-                       
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = ParticleLabelingApp(root)

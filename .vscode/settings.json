@@ -2,11 +2,16 @@
     "cSpell.words": [
         "crossentropy",
         "cupy",
+        "dataframe",
         "fromarray",
         "imread",
+        "isin",
+        "iterrows",
         "LANCZOS",
+        "nunique",
         "putalpha",
-        "scrollregion"
+        "scrollregion",
+        "trackpy"
     ],
     "python.testing.unittestArgs": [
         "-v",
