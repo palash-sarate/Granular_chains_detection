@@ -10,34 +10,8 @@ import cupy as cp  # Import cupy for GPU computations
 import numpy as np
 # import math
 import pandas as pd
+from Tooltips import CanvasTooltip, Tooltip 
 
-class Tooltip:
-    def __init__(self, widget, text):
-        self.widget = widget
-        self.text = text
-        self.tooltip_window = None
-        widget.bind("<Enter>", self.show_tooltip)
-        widget.bind("<Leave>", self.hide_tooltip)
-
-    def show_tooltip(self, event):
-        if self.tooltip_window or not self.text:
-            return
-        x, y, _, _ = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 25
-        self.tooltip_window = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(tw, text=self.text, justify='left',
-                         background="#ffffe0", relief='solid', borderwidth=1,
-                         font=("tahoma", "8", "normal"))
-        label.pack(ipadx=1)
-
-    def hide_tooltip(self, event):
-        tw = self.tooltip_window
-        self.tooltip_window = None
-        if tw:
-            tw.destroy()
 class ParticleLabelingApp:
     def __init__(self, master):
         self.finding_pairs = False
@@ -145,7 +119,7 @@ class ParticleLabelingApp:
                                        on, off)          
         )
         self.visibility_toggle.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.visibility_toggle, "Toggle particle visibility")
+        Tooltip("Toggle particle visibility", self.visibility_toggle)
         
         chains_visibility_label = tk.Label(self.left_frame, text="Show Chains", width=widget_width)
         chains_visibility_label.pack()            
@@ -160,7 +134,7 @@ class ParticleLabelingApp:
                                        on, off)          
         )
         self.chains_visibility_toggle.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.chains_visibility_toggle, "Toggle chains visibility")
+        Tooltip("Toggle chains visibility",self.chains_visibility_toggle)
         
         add_label = tk.Label(self.left_frame,text="Add Particle Location")
         add_label.pack() 
@@ -175,7 +149,7 @@ class ParticleLabelingApp:
                                        on, off),            
         )
         self.add_location_toggle.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.add_location_toggle, "Once on click on the canvas to add a particle")
+        Tooltip("Once on click on the canvas to add a particle",self.add_location_toggle)
         
         # Create a checkbox to toggle delete functionality
         self.delete_location_toggle = tk.Button(
@@ -185,28 +159,28 @@ class ParticleLabelingApp:
             width=widget_width
             )
         self.delete_location_toggle.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.delete_location_toggle, "Deleted selected particles")
+        Tooltip("Deleted selected particles",self.delete_location_toggle)
         
         # clear selection button
         self.clear_selection_button = tk.Button(self.left_frame,
                                                 text="Clear Selection", 
                                                 command=self.clear_particle_selection, width=widget_width)
         self.clear_selection_button.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.clear_selection_button, "Clear the selected particle")
+        Tooltip("Clear the selected particle",self.clear_selection_button)
         
         # mark currentlly selected particle as a chain
         self.mark_chain_button = tk.Button(self.left_frame,
                                              text="Mark Chain",
                                             command=self.mark_chain, width=widget_width)
         self.mark_chain_button.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.mark_chain_button, "Mark the selected particles as a chain")
+        Tooltip("Mark the selected particles as a chain",self.mark_chain_button)
         
         # add text box to enter custom chain id
         add_label = tk.Label(self.left_frame,text="Enter a custom chain id")
         add_label.pack()
         self.custom_chain_id = tk.Entry(self.left_frame, width=widget_width)
         self.custom_chain_id.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.custom_chain_id, "Enter a custom chain id to mark to current selection")
+        Tooltip("Enter a custom chain id to mark to current selection",self.custom_chain_id)
         
         # Dropdown to select the chain length
         self.chain_length = tk.IntVar(value=1)
@@ -215,7 +189,7 @@ class ParticleLabelingApp:
         self.chain_length_dropdown = tk.OptionMenu(self.left_frame, self.chain_length, 1, 4, 12, 24, 48)
         self.chain_length_dropdown.config(width=widget_width-3)
         self.chain_length_dropdown.pack(anchor='nw', pady=(0, 5))
-        Tooltip(self.chain_length_dropdown, "Select the chain length")
+        Tooltip("Select the chain length",self.chain_length_dropdown)
     
     def save_metadata(self):
         # Save metadata to a JSON file
@@ -548,10 +522,12 @@ class ParticleLabelingApp:
         self.dragging_overlay = False
     
     def start_pan(self, event):
-        # Remove all particle locations
-        self.clear_all_locations() # this makes panning image much faster
         # Record the current mouse position
         if self.dragging_overlay is False:
+            # Remove all particle locations
+            self.clear_all_locations() # this makes panning image much faster
+            # remove all chain outlines
+            self.clear_chains()
             self.pan_start_x = event.x
             self.pan_start_y = event.y
             self.image_start_x, self.image_start_y = self.canvas.coords(self.image_id)
@@ -740,9 +716,12 @@ class ParticleLabelingApp:
         self.refresh_locations()
         print(f"Added particle at: ({x}, {y})")
 
+    def clear_chains(self):
+        self.canvas.delete('chain_outline')
+        
     def draw_chains(self):
         # clear all chain outlines
-        self.canvas.delete('chain_outline')
+        self.clear_chains()
         if not self.draw_chains_toggle.get():
             return
         # Draw chains on the canvas
@@ -765,10 +744,11 @@ class ParticleLabelingApp:
             canvas_x = x * self.zoom_level + self.canvas.coords(self.image_id)[0]
             canvas_y = y * self.zoom_level + self.canvas.coords(self.image_id)[1]
             radius = 5  # Adjust the radius for the outline
-            self.canvas.create_oval(
+            outline_handle = self.canvas.create_oval(
             canvas_x - radius, canvas_y - radius, canvas_x + radius, canvas_y + radius,
             outline=chain_color, width=3, tags='chain_outline'
             )
+            CanvasTooltip(canvas=self.canvas, tag_or_id=outline_handle, text=f"Chain ID: {chain_id}")
 
     def get_chain_color(self, chain_id):
         """
@@ -789,21 +769,49 @@ class ParticleLabelingApp:
             chain_length = self.chain_length.get()
             # get the max of chainId column of self.particles dataframe
             max_chain_id = self.particles['chainId'].max()
+            # read the custom chain id
+            custom_chain_id = self.custom_chain_id.get()
             # check if selected particles are already in a chain
             chains_ids = self.particles.loc[self.particles['id'].isin(self.selected_particles), 'chainId']
             print(f"chains_ids: {chains_ids}")
-            # check if selected particles are already in a chain
-            if chains_ids.nunique() > 1 & chains_ids.nunique() != 1 & np.all(chains_ids.unique() != -1):
-                self.status.config(text="Some particles already marked in chains.")
+            
+            # if there are more than one chain_id except -1, do not mark any particles as chain, throw an error
+            # Count the number of valid chain_ids
+            valid_chain_ids = chains_ids[chains_ids != -1]
+            num_valid_chain_ids = valid_chain_ids.nunique()
+            print(f"Number of valid chain_ids: {num_valid_chain_ids}")        
+            if num_valid_chain_ids > 1:
+                self.status.config(text="Selected particles belong to multiple chains.")
+                # clear selection
+                self.clear_particle_selection()
                 return
-            if max_chain_id == -1 :
-                new_chain_id = 0
-            else :
-                new_chain_id = max_chain_id + 1
-            self.particles.loc[self.particles['id'].isin(self.selected_particles), 'chainId'] = new_chain_id
-            print("new chain id:",new_chain_id)
+            
+            # if only some chain_id and -1 , mark all particles with chain_id
+            if num_valid_chain_ids == 1:
+                chain_id = valid_chain_ids.iloc[0]
+                print(f"marking all with chain_id: {chain_id}")
+                self.particles.loc[self.particles['id'].isin(self.selected_particles), 'chainId'] = chain_id
+                # clear selection
+                self.clear_particle_selection()
+                return
+            # if all chain_ids == -1 , mark all particles with new chain_id
+            if num_valid_chain_ids == 0:
+                if custom_chain_id:
+                    new_chain_id = int(custom_chain_id)
+                else:
+                    if max_chain_id == -1 :
+                        new_chain_id = 0
+                    else :
+                        new_chain_id = max_chain_id + 1
+                self.particles.loc[self.particles['id'].isin(self.selected_particles), 'chainId'] = new_chain_id
+                # clear custom chain id
+                self.custom_chain_id.delete(0, tk.END)
+                print("new chain id:",new_chain_id)
+                # clear selection
+                self.clear_particle_selection()
+                return
         else:
-            self.status.config(text="No particle selected.")
+            self.status.config(text="No particles selected to mark as chain.")
     
     def clear_particle_selection(self):
         self.selected_particles = []

@@ -11,7 +11,9 @@
         "nunique",
         "putalpha",
         "scrollregion",
-        "trackpy"
+        "trackpy",
+        "waittime",
+        "wraplength"
     ],
     "python.testing.unittestArgs": [
         "-v",
