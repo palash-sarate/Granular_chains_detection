@@ -47,9 +47,8 @@ class ParticleLabelingApp:
         self.master.protocol("WM_DELETE_WINDOW", self.on_quit)
         
         self.load_metadata()
-
-        if self.isDev:
-            self.load_image()
+        self.load_image()
+        self.schedule_save_data()
 
     def create_topBar(self):
         # Create a frame for the top bar
@@ -579,7 +578,13 @@ class ParticleLabelingApp:
     def save_data(self):
         # save dataframe
         self.particles.to_csv(f"./labelled_data/{self.image_name.replace(self.image_ext, '_data.csv')}", index=False)
-
+    
+    def schedule_save_data(self):
+        # Call the save_data method
+        self.save_data()
+        # Schedule the function to run again after 60 seconds
+        threading.Timer(60, self.schedule_save_data).start()
+        
     def refresh_locations(self):
         print("Refreshing locations")
         # Remove all particle locations
